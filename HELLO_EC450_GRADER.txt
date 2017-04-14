@@ -1,0 +1,3 @@
+We have SPI bitbanged off GPIOs 4.5 4.7 5.4 5.5
+It's not quite SPI, there's a byte start bit sent instead of SS
+It can send things back and forth

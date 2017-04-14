@@ -1,197 +1,241 @@
 /*
  * spi.c
  *
- *  Created on: Apr 4, 2017
+ *  Created on: Apr 13, 2017
  *      Author: anton
  */
 
-#include "msp.h"
+
 #include "spi.h"
 
-#if !defined(SPI_MASTER) && !defined(SPI_SLAVE)
-#error "You should define SPI_MASTER or SPI_SLAVE to use this"
-#endif
+typedef struct {\
 
-#define SPI_BUFSIZE 100
+    void(*callback)(char);
+    gpio_t* mosi;
+    gpio_t* miso;
+    gpio_t* sync;
+    gpio_t* clk;
+    char isMaster;
+    Timer_A_Type* timer;
 
-char spi_writebuf[SPI_BUFSIZE];
-char spi_writeSize;
+    char outbuffer[spi_buffer_size];
+    char outbuffer_index;
+    char out_bytepos;
 
-char spi_readbuf[SPI_BUFSIZE];
-int spi_rpos;
+    char inbuffer;
+    char in_bytepos;
 
-char spi_readOut[SPI_BUFSIZE];
-char spi_readSize;
+    char enabled;
+    char clkstate;
+    char writestate;
+} spi_tx;
 
-char spi_writeOut[SPI_BUFSIZE];
-int spi_wpos;
+void spi_noop(char x) {
 
-char spi_timer;
-char spi_clkEdge;
-char spi_readEn;
-char spi_writeEn;
+};
+void spi_master_tick(spi_t* self);
+void spi_slave_tick(spi_t* self);
+inline char spi_readbit(char byte, char pos);
+inline void spi_setbit(char* byte, char pos, char value);
+void spi_rotoutbuffer(spi_tx* self);
 
-#ifdef SPI_SLAVE
-char spi_synchronized;
-#endif
+spi_t* spi_init(void* mem, char isMaster,
+                gpio_t* mosi, gpio_t* miso, gpio_t* clk, gpio_t* sync,
+                Timer_A_Type* timer, IRQn_Type interruptFlag) {
 
-void spi_bitWrite();
-void spi_bitRead();
+    spi_tx* spi = (spi_tx*) mem;
 
-void spi_setup() {
+    spi -> isMaster = isMaster;
+    if (isMaster) {
+        gpio_input(miso);
+        gpio_output(clk);
+        gpio_output(mosi);
+        gpio_output(sync);
+    } else {
+        gpio_output(miso);
+        gpio_input(clk);
+        gpio_input(mosi);
+        gpio_input(sync);
+    }
+
+    spi -> callback = spi_noop;
+    spi -> mosi = mosi;
+    spi -> miso = miso;
+    spi -> sync = sync;
+    spi -> clk = clk;
+
+    spi -> timer = timer;
+    timer -> CTL &= ~BIT9; timer -> CTL |= BIT8; // ACLK
+    timer -> CTL &= ~BIT7; timer -> CTL &= ~BIT6; // Div 1
+    timer -> CTL &= ~BIT5; timer -> CTL |= BIT4; // Count-up mode
+    timer -> CTL |= BIT1; // Interrupt on
+    NVIC -> ISER[0] = 1 << ((interruptFlag) & 31);
+
     char i;
-    for (i=0; i<SPI_BUFSIZE; i++) {
-        spi_writebuf[i] = 0;
-        spi_readbuf[i] = 0;
-        spi_readOut[i] = 0;
-        spi_writeOut[i] = 0;
+    for (i=0; i<spi_buffer_size; i++) {
+        (spi -> outbuffer)[i] = 0;
     }
-    spi_wpos = 0;
-    spi_rpos = 0;
-    spi_readSize = 0;
-    spi_writeSize = 0;
+    spi -> outbuffer_index = 0;
+    spi -> out_bytepos = 0;
 
-    spi_clkEdge = 0;
-    spi_timer = 0;
+    spi -> inbuffer = 0;
+    spi -> in_bytepos = 0;
 
-    // Run off ACLK
-    TIMER_A0 -> CTL &= ~BIT9; TIMER_A0 -> CTL |= BIT8;
-    TIMER_A0 -> CTL |= BIT7; TIMER_A0 -> CTL |= BIT6;
-    // Turn on counting up
-    TIMER_A0 -> CTL &= ~BIT5; TIMER_A0 -> CTL |= BIT4;
-    // Ping at a constant 32768/2048
-    TIMER_A0 -> CCR[0] = 10;
+    spi -> enabled = 0;
+    spi -> clkstate = 0;
+    spi -> writestate = 0;
 
-    // Enable interrupts
-    TIMER_A0 -> CTL |= BIT1;
-    NVIC -> ISER[0] = 1 << ((TA0_N_IRQn) & 31);
-
-#ifdef SPI_SLAVE
-    P4 -> DIR &= ~BIT5;
-    P4 -> DIR |= BIT7;
-    P5 -> DIR &= ~BIT4;
-    P5 -> DIR &= ~BIT5;
-#endif
-#ifdef SPI_MASTER
-    P4 -> DIR |= BIT5;
-    P4 -> DIR &= ~BIT7; //MISO
-    P5 -> DIR |= BIT4; // MOSI
-    P5 -> DIR |= BIT5; // CLK
-#endif
-
-#ifdef SPI_SLAVE
-    spi_synchronized = 0;
-#endif
+    return (spi_t*) spi;
 }
 
-
-
-char* spi_read(char bytes) {
-    char i;
-    spi_readEn = 1;
-    while (bytes * 8 > spi_rpos) {
-        __sleep();
-    }
-    for (i=0; i<bytes; i++) {
-        spi_readOut[i] = spi_readbuf[i];
-    }
-    spi_rpos = 0;
-    spi_readEn = 0;
-#ifdef SPI_SLAVE
-    spi_synchronized = 0;
-#endif
-    return spi_readOut;
+void spi_recvByte(spi_t* self, void(*callback)(char)) {
+    spi_tx* s = (spi_tx*) self;
+    s -> callback = callback;
 }
 
-void spi_put(char c) {
-    spi_writebuf[spi_writeSize] = c;
-    spi_writeSize += 1;
+void spi_put(spi_t* self, char data) {
+    spi_tx* s = (spi_tx*) self;
+    (s -> outbuffer)[(s -> outbuffer_index)] = data;
+    s -> outbuffer_index += 1;
 }
 
-void spi_writeout() {
-    char i;
-    spi_writeEn = 1;
-    for (i=0; i<spi_writeSize; i++) {
-        spi_writeOut[i] = spi_writebuf[i];
-    }
+void spi_hold(spi_t* self) {
+    spi_tx* s = (spi_tx*) self;
+    s -> enabled = 0;
 }
 
-char spi_writeFinished() {
-    return (spi_writeEn == 0);
+void spi_start(spi_t* self) {
+    spi_tx* s = (spi_tx*) self;
+    s -> enabled = 1;
 }
 
-void spi_bitWrite() {
-    char bit = 1 << (spi_wpos % 8);
-    char byte = spi_wpos / 8;
-    char val = spi_writeOut[byte] & bit;
-    spi_wpos++;
-#ifdef SPI_MASTER
-    if (val == 0) {
-        P5 -> OUT &= ~BIT4;
+void spi_onInterrupt(spi_t* self) {
+    spi_tx* s = (spi_tx*) self;
+    s -> timer -> CTL &= ~BIT0;
+    if (s -> isMaster) {
+        spi_master_tick(self);
     } else {
-        P5 -> OUT |= BIT4;
-    }
-    if (bit == 1) {
-        P4 -> OUT |= BIT5;
-    } else {
-        P4 -> OUT &= ~BIT5;
-    }
-#endif
-#ifdef SPI_SLAVE
-    if (val == 0) {
-        P4 -> OUT &= ~BIT7;
-    } else {
-        P4 -> OUT |= BIT7;
-    }
-#endif
-    if (spi_wpos == 8 * spi_writeSize) {
-        spi_wpos = 0;
-        spi_writeEn = 0;
-        spi_writeSize = 0;
+        spi_slave_tick(self);
     }
 }
 
-void spi_bitRead() {
-    char bit = 1 << (spi_rpos % 8);
-    char byte = spi_rpos / 8;
-    spi_rpos++;
-#ifdef SPI_MASTER
-    char val = P4 -> IN & BIT7;
-#endif
-#ifdef SPI_SLAVE
-    char val = P5 -> IN & BIT4;
-#endif
-    if (val == 0) {
-        spi_readbuf[byte] &= ~bit;
-    } else {
-        spi_readbuf[byte] |= bit;
-    }
+void spi_setspeed(spi_t* self, uint16_t speed) {
+    spi_tx* s = (spi_tx*) self;
+    s -> timer -> CCR[0] = speed;
 }
 
+void spi_master_tick(spi_t* self) {
+    spi_tx* s = (spi_tx*) self;
 
-void spi_onTimingInterrupt() {
-#ifdef SPI_MASTER
-    if (spi_timer % 8 == 0) {
-        P5 -> OUT ^= BIT5;
+    if (s -> enabled) {
+        gpio_toggle(s -> clk);
+        s -> clkstate ^= BIT0;
+    } else {
+        gpio_off(s -> clk);
+        s -> clkstate = 0;
+        return;
     }
-#endif
-#ifdef SPI_SLAVE
-    if (spi_synchronized == 0) {
-        if (((P4 -> IN) & BIT5) == 0) {
-            return;
+
+    if (s -> clkstate == 0) {
+        spi_setbit(&(s -> inbuffer), s -> in_bytepos, gpio_read(s -> miso)); // Read a bit
+        s -> in_bytepos += 1;
+        if (s -> in_bytepos == 8) { // If we've got a full byte, run the callback & reset
+            s -> in_bytepos = 0;
+            s -> callback(s -> inbuffer);
+            s -> inbuffer = 0;
+        }
+    } else {
+        if (s -> out_bytepos == 0) { // Set the sync line high for the first bit
+            gpio_on(s -> sync);
         } else {
-            spi_synchronized = 1;
+            gpio_off(s -> sync);
+        }
+
+        if (spi_readbit(s -> outbuffer[0], s -> out_bytepos) == 0) {
+            gpio_off(s -> mosi);
+        } else {
+            gpio_on(s -> mosi);
+        }
+        s -> out_bytepos += 1;
+
+        if (s -> out_bytepos == 8) {
+            if (s -> outbuffer_index > 0) {
+                char i;
+                for (i=0; i<spi_buffer_size-1; i++) {
+                    s -> outbuffer[i] = s -> outbuffer[i+1];
+                }
+                s -> outbuffer[spi_buffer_size-1] = 0;
+                s -> outbuffer_index -= 1;
+            } else {
+                s -> outbuffer[0] = 0;
+            }
+            s -> out_bytepos = 0;
         }
     }
-#endif
-    if (((P5 -> IN) & BIT5) != spi_clkEdge) {
-        spi_clkEdge = (P5 -> IN) & BIT5;
-        if (spi_readEn != 0 && spi_clkEdge != 0) { // on posedge read
-            spi_bitRead();
-        }
-        if (spi_writeEn != 0 && spi_clkEdge == 0) { // on negedge write
-            spi_bitWrite();
-        }
+}
+
+void spi_slave_tick(spi_t* self) {
+    spi_tx* s = (spi_tx*) self;
+
+    if (! (s -> enabled)) {
+        gpio_off(s -> miso);
+        return;
     }
-    spi_timer += 1;
+
+    char clk = gpio_read(s -> clk);
+    if (clk == s -> clkstate) {
+        return;
+    } else {
+        s -> clkstate = clk;
+    }
+
+    if (clk == 0 && ((s -> in_bytepos > 0) || (gpio_read(s -> sync) != 0))) { // If it's read time, and we're either already reading or synced to read
+        spi_setbit(&(s -> inbuffer), s -> in_bytepos, gpio_read(s -> mosi));
+        s -> in_bytepos += 1;
+        s -> writestate = 1;
+
+        if (s -> in_bytepos == 8) {
+            s -> in_bytepos = 0;
+            s -> callback(s -> inbuffer);
+            s -> inbuffer = 0;
+        }
+
+    } else if ((clk == 1) && (s -> writestate == 1)) {
+        if (spi_readbit(s -> outbuffer[0], s -> out_bytepos) != 0) {
+            gpio_on(s -> miso);
+        } else {
+            gpio_off(s -> miso);
+        }
+
+        s -> out_bytepos += 1;
+        if (s -> out_bytepos == 8) {
+            if (s -> outbuffer_index > 0) {
+                char i;
+                for (i=0; i<spi_buffer_size-1; i++) {
+                    s -> outbuffer[i] = s -> outbuffer[i+1];
+                }
+                s -> outbuffer[spi_buffer_size-1] = 0;
+                s -> outbuffer_index -= 1;
+            } else {
+                s -> outbuffer[0] = 0;
+            }
+        }
+        s -> out_bytepos = 0;
+    }
+}
+
+inline char spi_readbit(char byte, char pos) {
+    if ((byte & (1 << pos)) == 0) {
+        return 0;
+    } else {
+        return 1;
+    }
+}
+
+inline void spi_setbit(char* byte, char pos, char value) {
+    if (value == 0) {
+        *byte &= ~(1 << pos);
+    } else {
+        *byte |= (1 << pos);
+    }
 }
