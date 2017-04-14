@@ -58,6 +58,11 @@ spi_t* spi_init(void* mem, char isMaster,
         gpio_input(sync);
     }
 
+    gpio_off(miso);
+    gpio_off(clk);
+    gpio_off(mosi);
+    gpio_off(sync);
+
     spi -> callback = spi_noop;
     spi -> mosi = mosi;
     spi -> miso = miso;
@@ -201,12 +206,6 @@ void spi_slave_tick(spi_t* self) {
         }
 
     } else {
-        if (spi_readbit(s -> outbuffer[0], s -> out_bytepos) != 0) {
-            gpio_on(s -> miso);
-        } else {
-            gpio_off(s -> miso);
-        }
-
         if ((s -> writestate) || (s -> out_bytepos > 0)) {
             s -> out_bytepos += 1;
         }
@@ -224,6 +223,12 @@ void spi_slave_tick(spi_t* self) {
             }
             s -> out_bytepos = 0;
             s -> writestate = 0;
+        }
+
+        if (spi_readbit(s -> outbuffer[0], s -> out_bytepos) != 0) {
+            gpio_on(s -> miso);
+        } else {
+            gpio_off(s -> miso);
         }
     }
 }
