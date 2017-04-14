@@ -200,14 +200,17 @@ void spi_slave_tick(spi_t* self) {
             s -> inbuffer = 0;
         }
 
-    } else if ((clk == 1) && (s -> writestate == 1)) {
+    } else {
         if (spi_readbit(s -> outbuffer[0], s -> out_bytepos) != 0) {
             gpio_on(s -> miso);
         } else {
             gpio_off(s -> miso);
         }
 
-        s -> out_bytepos += 1;
+        if ((s -> writestate) || (s -> out_bytepos > 0)) {
+            s -> out_bytepos += 1;
+        }
+
         if (s -> out_bytepos == 8) {
             if (s -> outbuffer_index > 0) {
                 char i;
@@ -219,8 +222,9 @@ void spi_slave_tick(spi_t* self) {
             } else {
                 s -> outbuffer[0] = 0;
             }
+            s -> out_bytepos = 0;
+            s -> writestate = 0;
         }
-        s -> out_bytepos = 0;
     }
 }
 

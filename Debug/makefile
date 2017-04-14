@@ -9,6 +9,7 @@ GEN_CMDS__FLAG :=
 
 ORDERED_OBJS += \
 "./gpio.obj" \
+"./joy.obj" \
 "./main.obj" \
 "./spi.obj" \
 "./startup_msp432p401r_ccs.obj" \
@@ -155,8 +156,8 @@ HW4.hex: $(EXE_OUTPUTS)
 # Other Targets
 clean:
 	-$(RM) $(BIN_OUTPUTS__QUOTED)$(EXE_OUTPUTS__QUOTED)
-	-$(RM) "gpio.obj" "main.obj" "spi.obj" "startup_msp432p401r_ccs.obj" "system_msp432p401r.obj" 
-	-$(RM) "gpio.d" "main.d" "spi.d" "startup_msp432p401r_ccs.d" "system_msp432p401r.d" 
+	-$(RM) "gpio.obj" "joy.obj" "main.obj" "spi.obj" "startup_msp432p401r_ccs.obj" "system_msp432p401r.obj" 
+	-$(RM) "gpio.d" "joy.d" "main.d" "spi.d" "startup_msp432p401r_ccs.d" "system_msp432p401r.d" 
 	-@echo 'Finished clean'
 	-@echo ' '
 

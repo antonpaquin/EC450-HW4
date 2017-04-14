@@ -15,6 +15,9 @@ spi_t* conn;
 char buff[256];
 char buffpos = 0;
 
+#define MASTER
+//#define SLAVE
+
 void onGetByte(char);
 
 void main(void) {
@@ -27,19 +30,40 @@ void main(void) {
 
 
     gpio_t* mosi = new_gpio(4,5);
-    gpio_t* miso = new_gpio(4,7);
+    gpio_t* miso = new_gpio(4,4);
     gpio_t* clk = new_gpio(5,4);
     gpio_t* sync = new_gpio(5,5);
 
-    //conn = spi_init(malloc(spi_size), SPI_MASTER, mosi, miso, clk, sync, TIMER_A0, TA0_N_IRQn); spi_setspeed(conn, 100);
-    conn = spi_init(malloc(spi_size), SPI_SLAVE, mosi, miso, clk, sync, TIMER_A0, TA0_N_IRQn); spi_setspeed(conn, 16);spi_put(conn, 179); spi_put(conn, 179); spi_put(conn, 179); spi_put(conn, 179);
-    spi_recvByte(conn, onGetByte);
-
+#ifdef MASTER
+    conn = spi_init(malloc(spi_size), SPI_MASTER, mosi, miso, clk, sync, TIMER_A0, TA0_N_IRQn);
+    spi_setspeed(conn, 1000);
     spi_put(conn, 179);
     spi_put(conn, 123);
     spi_put(conn, 31);
     spi_put(conn, 252);
     spi_put(conn, 208);
+#endif
+#ifdef SLAVE
+    conn = spi_init(malloc(spi_size), SPI_SLAVE, mosi, miso, clk, sync, TIMER_A0, TA0_N_IRQn);
+    spi_setspeed(conn, 100);
+    spi_put(conn, 255);
+    spi_put(conn, 127);
+    spi_put(conn, 127);
+    spi_put(conn, 127);
+    spi_put(conn, 0);
+    spi_put(conn, 0);
+    spi_put(conn, 0);
+    spi_put(conn, 0);
+    spi_put(conn, 179);
+    spi_put(conn, 31);
+    spi_put(conn, 170);
+    spi_put(conn, 179);
+    spi_put(conn, 0);
+    spi_put(conn, 0);
+    spi_put(conn, 0);
+    spi_put(conn, 0);
+#endif
+    spi_recvByte(conn, onGetByte);
     spi_start(conn);
 
     while (1) {

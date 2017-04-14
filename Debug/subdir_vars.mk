@@ -8,6 +8,7 @@ CMD_SRCS += \
 
 C_SRCS += \
 ../gpio.c \
+../joy.c \
 ../main.c \
 ../spi.c \
 ../startup_msp432p401r_ccs.c \
@@ -15,6 +16,7 @@ C_SRCS += \
 
 C_DEPS += \
 ./gpio.d \
+./joy.d \
 ./main.d \
 ./spi.d \
 ./startup_msp432p401r_ccs.d \
@@ -22,6 +24,7 @@ C_DEPS += \
 
 OBJS += \
 ./gpio.obj \
+./joy.obj \
 ./main.obj \
 ./spi.obj \
 ./startup_msp432p401r_ccs.obj \
@@ -29,6 +32,7 @@ OBJS += \
 
 OBJS__QUOTED += \
 "gpio.obj" \
+"joy.obj" \
 "main.obj" \
 "spi.obj" \
 "startup_msp432p401r_ccs.obj" \
@@ -36,6 +40,7 @@ OBJS__QUOTED += \
 
 C_DEPS__QUOTED += \
 "gpio.d" \
+"joy.d" \
 "main.d" \
 "spi.d" \
 "startup_msp432p401r_ccs.d" \
@@ -43,6 +48,7 @@ C_DEPS__QUOTED += \
 
 C_SRCS__QUOTED += \
 "../gpio.c" \
+"../joy.c" \
 "../main.c" \
 "../spi.c" \
 "../startup_msp432p401r_ccs.c" \
