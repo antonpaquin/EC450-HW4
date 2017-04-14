@@ -1,0 +1,55 @@
+//*****************************************************************************
+//
+// MSP432 main.c template - Empty main
+//
+//****************************************************************************
+
+#include "C:\ti\simplelink_msp432_sdk_1_30_00_40\source\ti\devices\msp432p4xx\inc\msp.h"
+#include <ti/devices/msp432p4xx/driverlib/driverlib.h>
+#include "spi.h"
+#include "joystick.h"
+#include "display.h"
+#include <ti/grlib/grlib.h>
+#include "LcdDriver/Crystalfontz128x128_ST7735.h"
+
+void main(void)
+{
+    // Variables for refresh of display
+    unsigned dotcolor;          // color of the dot to display
+      uint16_t xdisplay,ydisplay; // screen coordinates to disolay
+
+    /* Halting WDT and disabling master interrupts */
+    MAP_CS_setDCOFrequency(10000000); // 10 MHz
+
+
+    init_display(); // setup the display
+    print_flag=0;   //clear print flag until there is a result
+    init_ADC();
+
+    MAP_Interrupt_disableSleepOnIsrExit();   // Specify that after an interrupt, the CPU wakes up
+    MAP_Interrupt_enableMaster();
+
+    /* Enable Interrupts at the NVIC level */
+    MAP_Interrupt_enableInterrupt(INT_ADC14);
+    MAP_Interrupt_enableInterrupt(INT_WDT_A);
+
+    while(1)
+    {
+        //__sleep();
+        //MAP_PCM_gotoLPM0();
+        MAP_ADC14_toggleConversionTrigger();
+        __no_operation(); //  For debugger
+        if (print_flag)
+        {
+            print_flag=0;
+            dotcolor=buttonPressed ? DOTCOL_PRESSED: DOTCOL;
+            xdisplay=resultsBuffer[0]/128;
+            ydisplay=127-resultsBuffer[1]/128;
+
+            print_current_results(resultsBuffer);
+            put_dot(xdisplay,ydisplay,dotcolor);
+        }
+    }
+}
+
+
